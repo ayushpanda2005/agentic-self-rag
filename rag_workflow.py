@@ -105,6 +105,7 @@ class RAGWorkflow:
         workflow.add_node("Retrieve Documents", self._retrieve)
         workflow.add_node("Grade Documents", self._evaluate)
         workflow.add_node("Generate Answer", self._generate_answer)
+        workflow.add_node("Validate Answer", self._validate_answer)
         workflow.add_node("Search Online", self._search_online)
 
         # Set entry point and edges
@@ -119,13 +120,17 @@ class RAGWorkflow:
             },
         )
 
+        # Generate Answer now goes to Validate Answer (a proper node)
+        workflow.add_edge("Generate Answer", "Validate Answer")
+
+        # Validate Answer routes based on its stored result
         workflow.add_conditional_edges(
-            "Generate Answer",
-            self._check_hallucinations,
+            "Validate Answer",
+            self._route_after_validation,
             {
-                "Hallucinations detected": "Generate Answer",
-                "Answers Question": END,
-                "Question not addressed": "Search Online",
+                "Accepted": END,
+                "Retry": "Generate Answer",
+                "Search Online": "Search Online",
             },
         )
         workflow.add_edge("Search Online", "Generate Answer")
@@ -201,10 +206,72 @@ class RAGWorkflow:
         question = state["question"]
         documents = state["documents"]
         
-        print(f"Generating answer using {len(documents)} documents")
+        # Track retry count
+        retry_count = state.get("retry_count", 0)
+        
+        print(f"Generating answer using {len(documents)} documents (attempt {retry_count + 1})")
         solution = generate_chain.invoke({"context": documents, "question": question})
         print(f"Answer generated: {len(solution)} characters")
         return {"documents": documents, "question": question, "solution": solution}
+    
+    def _validate_answer(self, state: GraphState):
+        """Validate the generated answer for hallucinations and relevance.
+        
+        This is a proper node (not a conditional edge) so it can store
+        evaluation scores in state. It sets a 'validation_result' key
+        that the routing function reads.
+        """
+        print("GRAPH STATE: Validate Answer")
+        question = state["question"]
+        documents = state["documents"]
+        solution = state["solution"]
+        retry_count = state.get("retry_count", 0)
+
+        # Max 2 retries to prevent infinite loops
+        MAX_RETRIES = 2
+
+        print("Checking document relevance...")
+        doc_relevance_score = document_relevance.invoke(
+            {"documents": documents, "solution": solution}
+        )
+
+        if doc_relevance_score.binary_score:
+            print("Document relevance check passed")
+            print("Checking question relevance...")
+            question_relevance_score = question_relevance.invoke(
+                {"question": question, "solution": solution}
+            )
+            
+            if question_relevance_score.binary_score:
+                print("VALIDATION: Answer accepted")
+                return {
+                    "document_relevance_score": doc_relevance_score,
+                    "question_relevance_score": question_relevance_score,
+                    "validation_result": "Accepted",
+                }
+            else:
+                print("VALIDATION: Question not addressed — routing to online search")
+                return {
+                    "document_relevance_score": doc_relevance_score,
+                    "question_relevance_score": question_relevance_score,
+                    "validation_result": "Search Online",
+                }
+        else:
+            # Hallucination detected
+            if retry_count >= MAX_RETRIES:
+                print(f"VALIDATION: Hallucination detected but max retries ({MAX_RETRIES}) reached — accepting answer")
+                return {
+                    "document_relevance_score": doc_relevance_score,
+                    "validation_result": "Accepted",
+                    "retry_count": retry_count,
+                }
+            else:
+                print(f"VALIDATION: Hallucination detected — retrying (attempt {retry_count + 1}/{MAX_RETRIES})")
+                return {
+                    "document_relevance_score": doc_relevance_score,
+                    "validation_result": "Retry",
+                    "retry_count": retry_count + 1,
+                }
     
     def _search_online(self, state: GraphState):
         """Search online for additional context if needed"""
@@ -239,35 +306,8 @@ class RAGWorkflow:
         print(f"ROUTING DECISION: Going to '{next_state}' (online_search: {online_search})")
         return next_state
     
-    def _check_hallucinations(self, state: GraphState):
-        """Check for hallucinations in the generated answers"""
-        print("GRAPH STATE: Check Hallucinations")
-        question = state["question"]
-        documents = state["documents"]
-        solution = state["solution"]
-
-        print("Checking document relevance...")
-        doc_relevance_score = document_relevance.invoke(
-            {"documents": documents, "solution": solution}
-        )
-
-        if doc_relevance_score.binary_score:
-            print("Document relevance check passed")
-            print("Checking question relevance...")
-            question_relevance_score = question_relevance.invoke({"question": question, "solution": solution})
-            
-            # Store the evaluation scores in state
-            state["document_relevance_score"] = doc_relevance_score
-            state["question_relevance_score"] = question_relevance_score
-            
-            if question_relevance_score.binary_score:
-                print("ROUTING DECISION: Going to 'END' (Answers Question)")
-                return "Answers Question"
-            else:
-                print("ROUTING DECISION: Going to 'Search Online' (Question not addressed)")
-                return "Question not addressed"
-        else:
-            print("ROUTING DECISION: Going to 'Generate Answer' (Hallucinations detected)")
-            # Store the document relevance score even if it failed
-            state["document_relevance_score"] = doc_relevance_score
-            return "Hallucinations detected"
+    def _route_after_validation(self, state):
+        """Route based on the validation result stored by _validate_answer"""
+        result = state.get("validation_result", "Accepted")
+        print(f"ROUTING DECISION after validation: '{result}'")
+        return result

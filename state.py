@@ -37,3 +37,5 @@ class GraphState(TypedDict):
     document_evaluations: Optional[List[Dict[str, Any]]]  # Store document evaluation results
     document_relevance_score: Optional[Dict[str, Any]]  # Store document relevance check
     question_relevance_score: Optional[Dict[str, Any]]  # Store question relevance check
+    retry_count: Optional[int]  # Track hallucination retry attempts
+    validation_result: Optional[str]  # 'Accepted', 'Retry', or 'Search Online'
