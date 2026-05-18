@@ -2,7 +2,6 @@
 # 🔎 Advanced RAG with LangGraph
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.41.1-red.svg)](https://streamlit.io/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.60-green.svg)](https://github.com/langchain-ai/langgraph)
 [![LangChain](https://img.shields.io/badge/LangChain-0.3.13-blue.svg)](https://python.langchain.com/)
@@ -321,9 +320,6 @@ LANGCHAIN_PROJECT=Advanced-RAG-LangGraph
 
 ---
 
-## License
-
-This project uses the MIT License - check out the [LICENSE](LICENSE) file for the details.
 
 
 
